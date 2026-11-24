@@ -84,6 +84,9 @@ fetch_pinned konica206-native-alpine https://github.com/vinod2807/konica206-nati
 
 say "applying $RASTER_ONLY_PATCH"
 APP="$CACHE/konica206-native-alpine"
+# Make reruns safe: the patch adds an untracked test file, which reset --hard
+# does not remove. The cache is disposable, so clean it before applying.
+git -C "$APP" clean -fdq
 git -C "$APP" apply --check "$HERE/$RASTER_ONLY_PATCH" || die "raster-only.patch does not apply to $KONICA206_NATIVE_ALPINE_COMMIT"
 git -C "$APP" apply "$HERE/$RASTER_ONLY_PATCH"
 
