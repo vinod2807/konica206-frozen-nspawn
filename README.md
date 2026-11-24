@@ -63,6 +63,8 @@ sudo scripts/install-host-integration.sh ./konica206-frozen-2026-11.tar.zst
 
 # 3. Connect host CUPS (CUPS 2.4, no PPD on the host).
 sudo lpadmin -p konica206 -E -v ipp://127.0.0.1:8001/ipp/print/konica206 -m everywhere
+# CUPS 2.4 otherwise defaults to 300 dpi and prints in a quarter of the page:
+sudo scripts/fix-cups-dpi.sh konica206
 
 # 4. Accept: verify no PDF, print on paper, unplug/replug, reboot.
 /var/lib/konica206-frozen/health/verify-raster-only.sh

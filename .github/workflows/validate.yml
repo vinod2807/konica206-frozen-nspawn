@@ -62,6 +62,7 @@ jobs:
               'scripts/remove-host-integration.sh',
               'scripts/health-check.sh',
               'scripts/verify-raster-only.sh',
+              'scripts/fix-cups-dpi.sh',
               'systemd/konica206-frozen-healthcheck.service',
               'systemd/konica206-frozen-healthcheck.timer',
               'udev/70-konica206.rules', 'cups/README.md',

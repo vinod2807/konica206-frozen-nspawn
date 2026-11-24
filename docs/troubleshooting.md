@@ -56,6 +56,15 @@ without it the script falls back to a shallow HTTP check. The script retries
 for 10 seconds, so a slow boot is usually not a failure. Check the port file at
 `/var/lib/konica206-frozen/health/port`.
 
+## Print lands in one quarter of the page
+
+The host CUPS queue is sending 300 dpi raster while the renderer is fixed at
+600 dpi. Check the container log for `raster data is 2480x3508x8`; a correct
+600 dpi A4 page is `4961x7016x8`. Fix the queue with
+`sudo scripts/fix-cups-dpi.sh <queue-name>` (see [cups/README.md](../cups/README.md))
+and print again. If `ipptool` shows `printer-resolution-default` twice, the
+script removes the duplicate.
+
 ## Printer wedge after a test page
 
 CUPS test pages and banner sheets can wedge the printer through PAPPL. Recovery

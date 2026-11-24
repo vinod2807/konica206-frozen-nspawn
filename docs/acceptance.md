@@ -46,8 +46,13 @@ PDF. Test it before relying on it.
    - a multi-page job;
    - a duplex job (long-edge and short-edge);
    - two copies.
-3. **Margins.** Check page sizes and margins from LibreOffice against the
-   engine's imageable area (12 pt / 4.23 mm inset from e2855dd).
+3. **Margins and scale.** Check page sizes and margins from LibreOffice against
+   the engine's imageable area (12 pt / 4.23 mm inset from e2855dd). If output
+   lands in one quarter of the sheet, the host CUPS queue is sending 300 dpi
+   raster: set `print-quality-default=high` and
+   `printer-resolution-default=600dpi` on the queue (see
+   [cups/README.md](../cups/README.md)) and confirm the container log reports
+   `4961x7016`, not `2480x3508`.
 4. **Recovery.** Unplug and replug the printer, then reboot the host. The
    service must return without manual intervention.
 5. **Do not** use CUPS test pages or banner sheets. They wedge the printer
