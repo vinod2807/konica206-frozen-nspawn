@@ -77,6 +77,19 @@ ldd_both() {
     chroot_sh 'ldd /usr/local/bin/konica206-native; echo ---; ldd /usr/local/lib/konica/konica-native'
 }
 
+# musl's ldd says "Error loading shared library libfoo.so: No such file...";
+# glibc's says "libfoo.so => not found". Ignore "symbol not found" lines: those
+# are only consequences of a library that failed to load.
+missing_libs() {
+    awk '
+        /Error loading shared library/ {
+            for (i = 1; i <= NF; i++)
+                if ($i == "library") { print $(i + 1); break }
+        }
+        /=> not found/ { print $1 }
+    ' "$1" | sed 's/:$//' | sort -u
+}
+
 say "fetching and pinning upstream sources"
 fetch_pinned pappl https://github.com/michaelrsweet/pappl.git "$PAPPL_COMMIT"
 fetch_pinned konica-native-musl https://github.com/vinod2807/konica-native-musl.git "$KONICA_NATIVE_MUSL_COMMIT"
@@ -148,8 +161,7 @@ say "restoring runtime libraries reported missing by ldd"
 n=0
 while [ "$n" -lt 3 ]; do
     ldd_both > "$LDD_FINAL" 2>&1 || die "ldd failed after removing packages"
-    # shellcheck disable=SC2013
-    missing=$(awk '/not found/ {print $1}' "$LDD_FINAL" | sort -u)
+    missing=$(missing_libs "$LDD_FINAL")
     [ -n "$missing" ] || break
     pkgs=""
     for soname in $missing; do
@@ -161,6 +173,14 @@ while [ "$n" -lt 3 ]; do
             libssl.so*|libcrypto.so*)      pkgs="$pkgs openssl" ;;
             libz.so*)                      pkgs="$pkgs zlib" ;;
             libavahi*)                     pkgs="$pkgs avahi" ;;
+            libintl.so*)                   pkgs="$pkgs gettext-libs" ;;
+            libzstd.so*)                   pkgs="$pkgs zstd-libs" ;;
+            libbrotli*)                    pkgs="$pkgs brotli-libs" ;;
+            libgnutls.so*)                 pkgs="$pkgs gnutls" ;;
+            libdbus-1.so*)                 pkgs="$pkgs dbus-libs" ;;
+            libp11-kit.so*)                pkgs="$pkgs p11-kit" ;;
+            libidn2.so*)                   pkgs="$pkgs libidn2" ;;
+            libunistring.so*)              pkgs="$pkgs libunistring" ;;
             *) die "no known package provides $soname (add it to the mapping in this script)" ;;
         esac
     done
@@ -171,7 +191,7 @@ while [ "$n" -lt 3 ]; do
     chroot_sh "apk add --no-cache $pkgs"
     n=$((n + 1))
 done
-[ -z "$(awk '/not found/ {print $1}' "$LDD_FINAL")" ] || die "unresolved library dependencies: $(cat "$LDD_FINAL")"
+[ -z "$(missing_libs "$LDD_FINAL")" ] || die "unresolved library dependencies: $(cat "$LDD_FINAL")"
 chroot_sh 'ldconfig'
 
 say "installing the three proprietary vendor files"
