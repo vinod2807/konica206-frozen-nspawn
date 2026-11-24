@@ -1,6 +1,6 @@
 {
   NAME "Konica 206 frozen health probe: GetPrinterAttributes"
-  OPERATION GetPrinterAttributes
+  OPERATION Get-Printer-Attributes
   GROUP operation-attributes-tag
   ATTR charset attributes-charset utf-8
   ATTR naturalLanguage attributes-natural-language en

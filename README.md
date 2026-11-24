@@ -58,6 +58,7 @@ sudo -E KONICA_VENDOR_ZIP=~/Downloads/BH225iGDILinux_201MU.zip \
   scripts/build-frozen-rootfs.sh
 
 # 2. Install on the Fedora target host (archive + .sha256 copied over).
+#    This also creates the PAPPL printer "konica206" in the container.
 sudo scripts/install-host-integration.sh ./konica206-frozen-2026-11.tar.zst
 
 # 3. Connect host CUPS (CUPS 2.4, no PPD on the host).
@@ -98,7 +99,7 @@ cups/README.md                                       host queue recipe
 - Read-only root at both the `.nspawn` and command-line level; no `apk` binary,
   config or cache in the image.
 - Only `/var/lib` (PAPPL state) and `/var/tmp` (job spool) are writable host
-  binds; `/tmp` and `/run` are small tmpfs mounts.
+  binds; `/tmp` is a small tmpfs (nspawn provides `/run`).
 - Host network namespace, `listen=localhost`: no LAN exposure of IPP or the
   PAPPL web interface.
 - Only `/dev/bus/usb` and `/sys/bus/usb/devices` are passed through, plus a

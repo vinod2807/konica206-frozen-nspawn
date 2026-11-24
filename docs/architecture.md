@@ -50,7 +50,7 @@ device-cgroup `DeviceAllow=char-usb_device rwm` rule complete the service.
 | `/` | frozen tarball, `ReadOnly=yes` + `--read-only` | all code and vendor data |
 | `/var/lib` | host `/var/lib/konica206-frozen/state` | PAPPL state file |
 | `/var/tmp` | host `/var/lib/konica206-frozen/spool` | CUPS raster and printer-stream spool (disk, not RAM) |
-| `/tmp`, `/run` | tmpfs (64M / 16M) | volatile scratch |
+| `/tmp` | tmpfs (64M) | volatile scratch; `/run` is provided by nspawn |
 
 The rootfs contains neither `/etc/apk`, `/lib/apk` nor `/var/cache/apk`; there
 is no way to install anything into a running container.

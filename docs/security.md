@@ -8,7 +8,8 @@
   on the command line. The image has no `apk` binary, `/etc/apk`, `/lib/apk` or
   `/var/cache/apk`, so nothing in it can install or update packages.
 - **Minimal writable surface.** Only `/var/lib` (PAPPL state) and `/var/tmp`
-  (job/raster spool) are host binds. `/tmp` and `/run` are small tmpfs mounts.
+  (job/raster spool) are host binds. `/tmp` is a small tmpfs; nspawn provides
+  `/run` itself.
 - **Minimal device access.** `/dev/bus/usb` is bound, not all of `/dev`. The
   device cgroup allows the USB character-device group only; no `--privileged`.
   The host udev rule matches the printer's `132b:232b` IDs.

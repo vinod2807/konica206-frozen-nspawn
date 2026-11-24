@@ -45,6 +45,10 @@ if [ ! -c "$ROOTFS/dev/null" ]; then
     mknod -m 666 "$ROOTFS/dev/random" c 1 8
     mknod -m 666 "$ROOTFS/dev/urandom" c 1 9
 fi
+# systemd-nspawn bind-mounts the host's /etc/localtime over this path; without
+# a target file the container fails to start with ENOENT.
+mkdir -p "$ROOTFS/etc"
+[ -e "$ROOTFS/etc/localtime" ] || : > "$ROOTFS/etc/localtime"
 for tool in git tar sha256sum install cp rm; do
     command -v "$tool" >/dev/null 2>&1 || die "missing host tool: $tool"
 done

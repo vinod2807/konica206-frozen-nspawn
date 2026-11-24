@@ -41,6 +41,10 @@ are cached under `$CACHE_DIR/sources` and pinned with `git reset --hard`.
    | `libssl.so*`, `libcrypto.so*` | `openssl` |
    | `libz.so*` | `zlib` |
    | `libavahi*` | `avahi` |
+   | `libintl.so*` | `gettext-libs` |
+   | `libzstd.so*` | `zstd-libs` |
+   | `libbrotli*` | `brotli-libs` |
+   | `libgnutls.so*`, `libdbus-1.so*`, `libp11-kit.so*`, `libidn2.so*`, `libunistring.so*` | their Alpine runtime packages |
 
    An unknown missing library is a hard error: add it to the mapping rather
    than shipping a rootfs that cannot start.

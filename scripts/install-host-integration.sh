@@ -17,6 +17,29 @@ HERE=$(cd "$(dirname "$0")/.." && pwd)
 say() { echo "==> $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+# PAPPL starts with zero printers; Create-Printer must be sent to the running
+# system. Reach the container's own /run and network namespace from the host.
+ensure_printer() {
+    n=0
+    while [ "$n" -lt 15 ]; do
+        systemctl is-active --quiet "$UNIT" && break
+        n=$((n + 1))
+        sleep 1
+    done
+    leader=$(machinectl show "$MACHINE_NAME" -p Leader --value 2>/dev/null || true)
+    if [ -z "$leader" ]; then
+        say "WARNING: container leader not found; create the printer manually (see docs)"
+        return 0
+    fi
+    if nsenter -t "$leader" -m -n -p -u -i -- /usr/local/bin/konica206-native add \
+        -d konica206 -m konica-bizhub-206 \
+        -v "konica://KONICA%20MINOLTA/206?serial=$PRINTER_SERIAL"; then
+        say "created PAPPL printer konica206"
+    else
+        say "WARNING: printer add failed (it may already exist)"
+    fi
+}
+
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo -E ...)"
 case "$IPP_PORT" in
     ''|*[!0-9]*) die "IPP_PORT must be numeric (got '$IPP_PORT')" ;;
@@ -98,6 +121,7 @@ chmod 644 "/etc/systemd/system/$HC_UNIT" "/etc/systemd/system/$HC_TIMER"
 say "enabling and starting $UNIT"
 systemctl daemon-reload
 systemctl enable --now "$UNIT" "$HC_TIMER"
+ensure_printer
 
 say "done"
 echo "Status:   systemctl status $UNIT"

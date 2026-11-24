@@ -86,8 +86,7 @@ jobs:
                        'Private=no', 'VirtualEthernet=no', 'Bind=/dev/bus/usb',
                        'Bind=/var/lib/konica206-frozen/state:/var/lib',
                        'Bind=/var/lib/konica206-frozen/spool:/var/tmp',
-                       'TemporaryFileSystem=/tmp:size=64M',
-                       'TemporaryFileSystem=/run:size=16M'):
+                       'TemporaryFileSystem=/tmp:size=64M'):
               assert line in nspawn, f"missing nspawn setting: {line}"
           assert not any(line.strip().startswith('ExecStart=')
                          for line in nspawn.splitlines()), \
