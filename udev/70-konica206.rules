@@ -1,0 +1,9 @@
+# Host udev rule for the Konica Minolta bizhub 206 (USB 132b:232b).
+# Installed on the Fedora host, never inside the frozen Alpine rootfs.
+# Keeps the device node usable across unplug/replug so the container, which
+# runs the PAPPL app as root, can open USB interface 1 through libusb.
+#
+# Do not add a competing rule that claims interface 1 for a CUPS backend:
+# only one process may own that interface at a time.
+
+SUBSYSTEM=="usb", ATTR{idVendor}=="132b", ATTR{idProduct}=="232b", MODE="0660", GROUP="lp", TAG+="uaccess"

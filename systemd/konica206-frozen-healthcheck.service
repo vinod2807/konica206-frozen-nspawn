@@ -1,0 +1,8 @@
+[Unit]
+Description=Probe the frozen bizhub 206 IPP endpoint on localhost
+After=systemd-nspawn@konica-frozen.service
+Wants=systemd-nspawn@konica-frozen.service
+
+[Service]
+Type=oneshot
+ExecStart=/var/lib/konica206-frozen/health/health-check.sh

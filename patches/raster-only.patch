@@ -1,0 +1,194 @@
+diff --git a/Makefile b/Makefile
+index 51ab416..dab293a 100644
+--- a/Makefile
++++ b/Makefile
+@@ -35,6 +35,13 @@ check: test-chunking test-ppd
+ 	./test-chunking
+ 	./test-ppd
+ 
++# Raster-only regression: runs as a normal user, no printer/vendor data needed.
++test-raster-only: test/test_raster_only.c src/konica_filter.c src/konica_filter.h
++	$(CC) $(CFLAGS) -Isrc -o $@ test/test_raster_only.c $(RASTER_LIBS)
++
++check-raster-only: test-raster-only
++	./test-raster-only
++
+ # Slow (~40 s): stuck-watchdog policy proof, not part of default check
+ check-watchdog: test-watchdog
+ 	./test-watchdog
+@@ -62,6 +69,6 @@ check-ppd: test-ppd
+ 	./test-ppd
+ 
+ clean:
+-	rm -f konica206-native konica-send konica-render test-chunking test-ppd
++	rm -f konica206-native konica-send konica-render test-chunking test-ppd test-raster-only
+ 
+-.PHONY: all check check-native check-watchdog install clean
++.PHONY: all check check-native check-watchdog check-raster-only install clean
+diff --git a/README.md b/README.md
+index 9da97a5..a2c18f6 100644
+--- a/README.md
++++ b/README.md
+@@ -32,6 +32,7 @@ the legacy application, and uses the glibc vendor filter already installed at
+ 
+ ## Test
+     make check           # chunking + PPD regression (no printer)
++    make check-raster-only  # raster-only mode regression (no printer/vendor data)
+     make check-watchdog  # stuck-watchdog policy proof (~40 s, no printer)
+     make check-native    # vendor-filter stage end to end (no printer, no USB)
+     NATIVE=/usr/local/lib/konica/konica-native make check-native   # the real filter
+@@ -66,6 +67,7 @@ Stop the old `konica206uri` app (or unplug/replug) before a physical test: both
+ | KONICA_SPOOLDIR | /var/tmp |
+ | KONICA_FILTER_TIMEOUT | 300 (seconds per stage) |
+ | KONICA_PDF_RENDERER | `system` (`builtin` uses gs pgmraw + own raster writer; default `system` until paper-signed-off) |
++| KONICA_RASTER_ONLY | `0` (set to `1` to advertise no `application/pdf`; the client must send PWG/URF/JPEG/PNG raster and no PDF renderer is used) |
+ | KONICA_STUCK_SECS | 600 (0 disables the stuck-job watchdog) |
+ | KONICA_LISTEN | `localhost` (or `any`); server `-o listen=` overrides |
+ | KONICA_MAX_MEM_MB | 2048 (0 disables address-space cap on filter children) |
+diff --git a/src/konica_filter.c b/src/konica_filter.c
+index 946943e..419bbd5 100644
+--- a/src/konica_filter.c
++++ b/src/konica_filter.c
+@@ -45,12 +45,33 @@ konica_cfg_load(konica_cfg_t *c)
+   c->timeout = (t && atoi(t) > 0) ? atoi(t) : 300;
+   t = getenv("KONICA_PDF_RENDERER");
+   c->pdf_renderer = (t && !strcmp(t, "builtin")) ? 1 : 0;
++  /* KONICA_RASTER_ONLY=1 makes this a raster-only printer application:
++   * PDF is not advertised in document-format-supported and the PDF print
++   * callback is not installed, so no PDF renderer is used at runtime. */
++  t = getenv("KONICA_RASTER_ONLY");
++  c->raster_only = (t && !strcmp(t, "1")) ? 1 : 0;
+   t = getenv("KONICA_MAX_MEM_MB");
+   c->max_mem_mb = (t && atol(t) >= 0) ? atol(t) : 2048;
+   t = getenv("KONICA_MAX_FILE_MB");
+   c->max_file_mb = (t && atol(t) >= 0) ? atol(t) : 512;
+ }
+ 
++int
++konica_raster_only(const konica_cfg_t *cfg)
++{
++  return cfg->raster_only;
++}
++
++/* PAPPL only puts d->format into document-format-supported.  Declaring no
++ * printer-specific format ("application/octet-stream" is always present)
++ * leaves PWG/URF/JPEG/PNG and removes application/pdf.  The string must stay
++ * non-NULL: PAPPL compares job formats against it with strcmp(). */
++const char *
++konica_document_format(const konica_cfg_t *cfg)
++{
++  return cfg->raster_only ? "application/octet-stream" : "application/pdf";
++}
++
+ static void
+ append_log(char *log, size_t logsize, const char *path)
+ {
+diff --git a/src/konica_filter.h b/src/konica_filter.h
+index 5809382..b41da25 100644
+--- a/src/konica_filter.h
++++ b/src/konica_filter.h
+@@ -31,12 +31,18 @@ typedef struct konica_cfg_s
+   char serial[64];           /* KONICA_SERIAL: restrict to one printer ("" = any) */
+   int  timeout;              /* KONICA_FILTER_TIMEOUT seconds per stage */
+   int  pdf_renderer;         /* 0 = system pdftoraster, 1 = builtin gs path */
++  int  raster_only;          /* KONICA_RASTER_ONLY: never advertise/accept PDF */
+   long max_mem_mb;           /* KONICA_MAX_MEM_MB: RLIMIT_AS for filter children (0 = none) */
+   long max_file_mb;          /* KONICA_MAX_FILE_MB: RLIMIT_FSIZE for filter children (0 = none) */
+ } konica_cfg_t;
+ 
+ void konica_cfg_load(konica_cfg_t *cfg);
+ 
++/* Raster-only mode: PAPPL advertises only raster formats, so no PDF-to-raster
++ * stage (Ghostscript or pdftoraster) is ever needed at runtime. */
++int konica_raster_only(const konica_cfg_t *cfg);
++const char *konica_document_format(const konica_cfg_t *cfg);
++
+ typedef int (*konica_cancel_cb)(void *ud);   /* return nonzero to abort */
+ 
+ /* Run one filter. in_path (may be NULL) is opened as stdin; out_path receives stdout.
+diff --git a/src/main.c b/src/main.c
+index 8503474..1c8698a 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -423,14 +423,17 @@ konica_driver(pappl_system_t *system, const char *driver_name, const char *devic
+   if (strcmp(driver_name, DRIVER_NAME))
+     return false;
+ 
+-  d->printfile_cb = konica_printfile;
++  /* Raster-only mode (KONICA_RASTER_ONLY=1): no PDF print callback and no
++   * application/pdf in document-format-supported, so PDF never enters this
++   * process and no Ghostscript/pdftoraster is needed in the rootfs. */
++  d->printfile_cb = cfg.raster_only ? NULL : konica_printfile;
+   d->rstartjob_cb = r_startjob;
+   d->rstartpage_cb = r_startpage;
+   d->rwriteline_cb = r_writeline;
+   d->rendpage_cb  = r_endpage;
+   d->rendjob_cb   = r_endjob;
+   d->status_cb    = konica_status;
+-  d->format       = "application/pdf";      /* PDF goes to printfile_cb untouched */
++  d->format       = konica_document_format(&cfg);
+ 
+   snprintf(d->make_and_model, sizeof(d->make_and_model), "KONICA MINOLTA 206");
+   d->ppm = 20;
+diff --git a/test/test_raster_only.c b/test/test_raster_only.c
+new file mode 100644
+index 0000000..a92237a
+--- /dev/null
++++ b/test/test_raster_only.c
+@@ -0,0 +1,56 @@
++/*
++ * Raster-only regression test for konica206-native.
++ *
++ * Includes konica_filter.c directly (the same trick as test_ppd.c) so this
++ * runs as a normal user with no PAPPL server, no printer, no USB device, no
++ * CUPS queue, no Ghostscript and no proprietary vendor data.
++ */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include "konica_filter.c"
++
++static int failures = 0;
++
++static void
++check(int ok, const char *what)
++{
++  printf("%s: %s\n", ok ? "ok" : "FAIL", what);
++  if (!ok)
++    failures ++;
++}
++
++int
++main(void)
++{
++  konica_cfg_t cfg;
++
++  unsetenv("KONICA_RASTER_ONLY");
++  konica_cfg_load(&cfg);
++  check(!konica_raster_only(&cfg), "default mode accepts PDF");
++  check(!strcmp(konica_document_format(&cfg), "application/pdf"),
++        "default document format is application/pdf");
++
++  setenv("KONICA_RASTER_ONLY", "1", 1);
++  konica_cfg_load(&cfg);
++  check(konica_raster_only(&cfg), "KONICA_RASTER_ONLY=1 is parsed");
++  check(strcmp(konica_document_format(&cfg), "application/pdf") != 0,
++        "raster-only mode does not advertise application/pdf");
++  check(!strcmp(konica_document_format(&cfg), "application/octet-stream"),
++        "raster-only mode leaves only the built-in raster formats");
++
++  setenv("KONICA_RASTER_ONLY", "0", 1);
++  konica_cfg_load(&cfg);
++  check(!konica_raster_only(&cfg), "KONICA_RASTER_ONLY=0 keeps PDF enabled");
++  check(!strcmp(konica_document_format(&cfg), "application/pdf"),
++        "PDF format is restored when raster-only is disabled");
++
++  if (failures)
++  {
++    fprintf(stderr, "%d raster-only check(s) failed\n", failures);
++    return 1;
++  }
++  puts("raster-only: all checks passed");
++  return 0;
++}

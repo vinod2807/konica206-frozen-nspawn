@@ -1,0 +1,37 @@
+# systemd-nspawn machine configuration for the frozen bizhub 206 server.
+# Installed by scripts/install-host-integration.sh to
+#   /etc/systemd/nspawn/konica-frozen.nspawn
+#
+# The root filesystem is immutable and has no package manager. Only the two
+# host directories bound below are writable; /tmp and /run are small tmpfs
+# mounts. There is deliberately no ExecStart= here: the host systemd drop-in
+# owns how the PAPPL app is started (single, reviewable service design).
+
+[Exec]
+Hostname=konica-frozen
+
+[Network]
+# Share the host network namespace so Fedora CUPS can reach 127.0.0.1:8001.
+# No veth, no private network, no LAN exposure of the PAPPL web interface.
+Private=no
+VirtualEthernet=no
+
+[Files]
+# Freeze the rootfs here as well as on the nspawn command line, so the freeze
+# holds whether the machine is started via the unit or with machinectl.
+ReadOnly=yes
+
+# PAPPL state (printer/system state file) on the host, not in the image.
+Bind=/var/lib/konica206-frozen/state:/var/lib
+# Job and raster spool on disk rather than in RAM (TMPDIR=/var/tmp is passed
+# to the app and its renderer child with --setenv).
+Bind=/var/lib/konica206-frozen/spool:/var/tmp
+
+# Only the USB device tree and the sysfs subtree libusb enumerates.
+# The host udev rule in udev/70-konica206.rules survives unplug/replug.
+Bind=/dev/bus/usb
+BindReadOnly=/sys/bus/usb/devices
+
+# Small, non-persistent scratch space.
+TemporaryFileSystem=/tmp:size=64M
+TemporaryFileSystem=/run:size=16M

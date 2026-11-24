@@ -1,0 +1,144 @@
+name: validate
+
+# Static validation plus the vendor-free raster-only test. This deliberately
+# does NOT claim to test USB printing: the physical matrix in
+# docs/acceptance.md is a manual gate on the real target machine.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  shell:
+    name: Shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+      - name: POSIX syntax check
+        run: |
+          for f in scripts/*.sh; do
+            echo "sh -n $f"
+            sh -n "$f"
+          done
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+
+  config:
+    name: Config, units and docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit syntax
+        run: |
+          set -e
+          TMPD=$(mktemp -d)
+          cp config/systemd/systemd-nspawn@konica-frozen.service.d/override.conf \
+             "$TMPD/systemd-nspawn@konica-frozen.service"
+          OUT=$(systemd-analyze verify systemd/*.service systemd/*.timer \
+                "$TMPD/systemd-nspawn@konica-frozen.service" 2>&1 || true)
+          echo "$OUT"
+          if echo "$OUT" | grep -Eqi 'failed to parse|unknown key|unknown lvalue|unknown section'; then
+            echo "systemd syntax error" >&2
+            exit 1
+          fi
+          rm -rf "$TMPD"
+      - name: Required settings and files
+        run: |
+          python3 - <<'PY'
+          import pathlib
+
+          root = pathlib.Path('.')
+          required = [
+              'README.md', 'config/pins.env',
+              'config/nspawn/konica-frozen.nspawn',
+              'config/systemd/systemd-nspawn@konica-frozen.service.d/override.conf',
+              'config/ipp/get-printer-attributes.test',
+              'patches/raster-only.patch',
+              'scripts/build-frozen-rootfs.sh',
+              'scripts/extract-vendor-data.sh',
+              'scripts/install-host-integration.sh',
+              'scripts/remove-host-integration.sh',
+              'scripts/health-check.sh',
+              'scripts/verify-raster-only.sh',
+              'systemd/konica206-frozen-healthcheck.service',
+              'systemd/konica206-frozen-healthcheck.timer',
+              'udev/70-konica206.rules', 'cups/README.md',
+              'docs/architecture.md', 'docs/build.md',
+              'docs/acceptance.md', 'docs/measurement.md',
+              'docs/security.md', 'docs/troubleshooting.md',
+              'docs/upstream-pins.md',
+          ]
+          missing = [p for p in required if not (root / p).is_file()]
+          assert not missing, f"missing files: {missing}"
+
+          pins = (root / 'config/pins.env').read_text()
+          for key in ('ALPINE_VERSION', 'ALPINE_MINIROOTFS_SHA256', 'PAPPL_COMMIT',
+                      'KONICA206_NATIVE_ALPINE_COMMIT', 'KONICA_NATIVE_MUSL_COMMIT',
+                      'RASTER_ONLY_PATCH', 'FROZEN_ARCHIVE', 'MACHINE_NAME',
+                      'IPP_PORT', 'ROOTFS', 'STATE_DIR'):
+              assert f"{key}=" in pins, f"missing pin: {key}"
+          assert 'e2855dd2ad3ec77cb35ec717b68bb26a2f94ec0d' in pins
+
+          nspawn = (root / 'config/nspawn/konica-frozen.nspawn').read_text()
+          for line in ('[Exec]', '[Network]', '[Files]', 'ReadOnly=yes',
+                       'Private=no', 'VirtualEthernet=no', 'Bind=/dev/bus/usb',
+                       'Bind=/var/lib/konica206-frozen/state:/var/lib',
+                       'Bind=/var/lib/konica206-frozen/spool:/var/tmp',
+                       'TemporaryFileSystem=/tmp:size=64M',
+                       'TemporaryFileSystem=/run:size=16M'):
+              assert line in nspawn, f"missing nspawn setting: {line}"
+          assert not any(line.strip().startswith('ExecStart=')
+                         for line in nspawn.splitlines()), \
+              "service design must be owned by the systemd drop-in"
+
+          override = (root / 'config/systemd/systemd-nspawn@konica-frozen.service.d/override.conf').read_text()
+          for line in ('Type=simple', 'ExecStart=', '@IPP_PORT@', '--read-only',
+                       '--setenv=KONICA_RASTER_ONLY=1',
+                       '--setenv=KONICA_VENDOR_FILTER=',
+                       '--setenv=KONICA_PPD=', '--setenv=TMPDIR=/var/tmp',
+                       '-o listen=localhost', 'Restart=on-failure',
+                       'CPUWeight=', 'IOWeight=', 'DeviceAllow=char-usb_device rwm'):
+              assert line in override, f"missing drop-in setting: {line}"
+          assert any(line.strip().startswith('# MemoryMax=')
+                     for line in override.splitlines()), \
+              "memory cap must stay commented out until Phase 5"
+
+          udev = (root / 'udev/70-konica206.rules').read_text()
+          assert '132b' in udev and '232b' in udev, "wrong USB id in udev rule"
+          build = (root / 'scripts/build-frozen-rootfs.sh').read_text()
+          for line in ('ghostscript', 'cups-filters', 'python3', 'ldd',
+                       '/etc/apk', '/lib/apk', '/var/cache/apk', '--zstd',
+                       'sha256sum', 'check-raster-only'):
+              assert line in build, f"missing build step: {line}"
+          print('config checks passed')
+          PY
+
+  raster-only-patch:
+    name: Patch applies and raster-only test passes (Alpine ${{ matrix.alpine }})
+    runs-on: ubuntu-latest
+    container: alpine:${{ matrix.alpine }}
+    strategy:
+      matrix:
+        alpine: ['3.24.2']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: apk add --no-cache build-base cups-dev git
+      - name: Read the pinned application revision
+        id: pins
+        run: |
+          . ./config/pins.env
+          echo "app=$KONICA206_NATIVE_ALPINE_COMMIT" >> "$GITHUB_OUTPUT"
+      - name: Apply the patch and run make check-raster-only
+        run: |
+          set -eu
+          PATCH="$PWD/patches/raster-only.patch"
+          git clone -q https://github.com/vinod2807/konica206-native-alpine.git app
+          git -C app reset --hard -q "${{ steps.pins.outputs.app }}"
+          git -C app apply --check "$PATCH"
+          git -C app apply "$PATCH"
+          # This target only needs CUPS raster headers; PAPPL/libusb are not
+          # installed in this scratch container (the frozen build builds them).
+          make -C app check-raster-only PKG_CONFIG=true
