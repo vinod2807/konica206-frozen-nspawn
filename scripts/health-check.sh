@@ -28,9 +28,10 @@ fi
 
 probe() {
     if command -v ipptool >/dev/null 2>&1 && [ -r "$TEST_FILE" ]; then
-        OUT=$(ipptool -t -q "$URL" "$TEST_FILE" 2>&1) || return 1
+        # -q suppresses even the PASS line on success, so do not use it here.
+        OUT=$(ipptool -t "$URL" "$TEST_FILE" 2>&1) || return 1
         case "$OUT" in
-            *printer-name*|*document-format-supported*) return 0 ;;
+            *'[PASS]'*) return 0 ;;
             *) return 1 ;;
         esac
     fi
