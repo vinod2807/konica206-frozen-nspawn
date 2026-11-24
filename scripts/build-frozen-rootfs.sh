@@ -34,6 +34,17 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "run as root (sudo -E ...) so the Alpine rootfs can be rebuilt"
 [ -d "$ROOTFS" ] || die "rootfs missing: $ROOTFS (build it with konica206-alpine-nspawn first)"
 [ -r "$HERE/$RASTER_ONLY_PATCH" ] || die "patch missing: $HERE/$RASTER_ONLY_PATCH"
+
+# The Alpine minirootfs has no /dev entries. Create the basics before any
+# chroot redirection: otherwise `cmd >/dev/null` silently creates a root-owned
+# regular file and breaks later unprivileged steps.
+if [ ! -c "$ROOTFS/dev/null" ]; then
+    rm -f "$ROOTFS/dev/null"
+    mknod -m 666 "$ROOTFS/dev/null" c 1 3
+    mknod -m 666 "$ROOTFS/dev/zero" c 1 5
+    mknod -m 666 "$ROOTFS/dev/random" c 1 8
+    mknod -m 666 "$ROOTFS/dev/urandom" c 1 9
+fi
 for tool in git tar sha256sum install cp rm; do
     command -v "$tool" >/dev/null 2>&1 || die "missing host tool: $tool"
 done
